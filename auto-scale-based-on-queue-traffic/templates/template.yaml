@@ -1,0 +1,168 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "A stack for deploying a SQS Queue alongside worker EC2 Instances with Auto Scaling based on the amount of unprocessed messages"
+Parameters:
+  WorkerInstanceImageId:
+    Type: String
+    Default: "ami-090fa75af13c156b4"
+  WorkerInstanceInstanceType:
+    Type: String
+    Default: "t2.micro"
+  WorkersASGAvailabilityZones:
+    Type: CommaDelimitedList
+    Default: "us-east-1a"
+  WorkersASGDesiredCapacity:
+    Type: Number
+    Default: 1
+  WorkersASGMaxSize:
+    Type: Number
+    Default: 2
+  WorkersASGMinSize:
+    Type: Number
+    Default: 1
+  DemoQueueNumberOfMessagesAlarmThreshold:
+    Type: Number
+    Default: 5
+  DemoQueueNumberOfMessagesAlarmPeriod:
+    Type: Number
+    Default: 300
+  DemoQueueNumberOfMessagesAlarmEvaluationPeriods:
+    Type: Number
+    Default: 1
+
+Resources:
+  DemoQueue:
+    Type: AWS::SQS::Queue
+
+  WorkerInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: "Allow worker instances to pull messages from DemoQueue"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+
+  # Allow worker EC2 Instances to receive and delete messages from DemoQueue
+  PullFromDemoQueuePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "PullFromDemoQueuePolicy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'sqs:ReceiveMessage'
+              - 'sqs:DeleteMessage'
+            Resource:
+              - !GetAtt DemoQueue.Arn
+      Roles: 
+        - !Ref WorkerInstanceRole
+
+  WorkerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      Roles: 
+       - !Ref WorkerInstanceRole
+  
+  WorkerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId:
+          Ref: WorkerInstanceImageId
+        InstanceType: 
+          Ref: WorkerInstanceInstanceType
+        IamInstanceProfile: 
+          Arn: !GetAtt WorkerInstanceProfile.Arn
+  
+  WorkersASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WorkerLaunchTemplate
+        Version: !GetAtt WorkerLaunchTemplate.LatestVersionNumber
+      AvailabilityZones:
+        Ref: WorkersASGAvailabilityZones
+      DesiredCapacity:
+        Ref: WorkersASGDesiredCapacity
+      DesiredCapacityType: "units"
+      MaxSize:
+        Ref: WorkersASGMaxSize
+      MinSize:
+        Ref: WorkersASGMinSize
+
+  # Scale Out to ASG's maximum size when there is a high number of unprocessed messages
+  WorkersScalingOutPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      PolicyType: SimpleScaling
+      AdjustmentType: ExactCapacity
+      AutoScalingGroupName: !Ref WorkersASG
+      ScalingAdjustment:
+        Ref: WorkersASGMaxSize
+
+  # Scale In to ASG's minimum size when there is a low number of unprocessed messages
+  WorkersScalingInPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      PolicyType: SimpleScaling
+      AdjustmentType: ExactCapacity
+      AutoScalingGroupName: !Ref WorkersASG
+      ScalingAdjustment:
+        Ref: WorkersASGMinSize
+  
+  # Alarm ASG when there is a high number of unprocessed messages
+  DemoQueueHighNumberOfMessagesAlarm: 
+    Type: AWS::CloudWatch::Alarm
+    Properties: 
+      AlarmDescription: "Alarm if DemoQueue depth increases to more than n messages"
+      Namespace: "AWS/SQS"
+      MetricName: "ApproximateNumberOfMessagesVisible"
+      Dimensions: 
+        - 
+          Name: "QueueName"
+          Value: !GetAtt DemoQueue.QueueName
+      Statistic: "Sum"
+      Period:
+        Ref: DemoQueueNumberOfMessagesAlarmPeriod
+      EvaluationPeriods:
+        Ref: DemoQueueNumberOfMessagesAlarmEvaluationPeriods
+      Threshold:
+        Ref: DemoQueueNumberOfMessagesAlarmThreshold
+      ComparisonOperator: "GreaterThanThreshold"
+      AlarmActions:
+        - !Ref WorkersScalingOutPolicy
+
+  # Alarm ASG when there is a low number of unprocessed messages
+  DemoQueueLowNumberOfMessagesAlarm: 
+    Type: AWS::CloudWatch::Alarm
+    Properties: 
+      AlarmDescription: "Alarm if DemoQueue depth decreases to less or equal to n messages"
+      Namespace: "AWS/SQS"
+      MetricName: "ApproximateNumberOfMessagesVisible"
+      Dimensions: 
+        - 
+          Name: "QueueName"
+          Value: !GetAtt DemoQueue.QueueName
+      Statistic: "Sum"
+      Period: "300"
+      EvaluationPeriods: "1"
+      Threshold: "5"
+      ComparisonOperator: "LessThanOrEqualToThreshold"
+      AlarmActions:
+        - !Ref WorkersScalingInPolicy
+
+Outputs:
+  DemoQueueId:
+    Description: The ID of the Demo Queue
+    Value: !Ref DemoQueue
+  WorkersASGId:
+    Description: The ID of the Workers ASG
+    Value: !Ref WorkersASG
