@@ -6,10 +6,10 @@ You have an unpredictable system where the amount of data that needs to be proce
 * scale out to withstand high loads
 * scale in to reduce costs when the load is low
 
-# Architectual solution
-Auto scale your worker EC2 Instances usign an Auto Scaling Group that scales out and in based on two Cloudwatch Alarms that track the "ApproximateNumberOfMessagesVisible", which is the number of messages available for retrieval from the queue.
+# Architectural solution
+Auto scale your worker EC2 Instances using an Auto Scaling Group that scales out and in based on two Cloudwatch Alarms that track the "ApproximateNumberOfMessagesVisible", which is the number of messages available for retrieval from the queue.
 
-Two alarms are needed because one indicates high load when the number of unprocessed messages is more than N, and viceversa.
+Two alarms are needed because one indicates high load when the number of unprocessed messages is more than N, and vice versa.
 
 <div style="text-align:center"><img src="images/chart.svg" /></div>
 
