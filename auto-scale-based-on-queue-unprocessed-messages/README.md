@@ -1,3 +1,5 @@
+<div style="text-align:center"><img src="../images/logo.png" /></div>
+
 # Problem
 You have an unpredictable system where the amount of data that needs to be processed can substantially increase in a moment. You want your system to:
 * auto scale
