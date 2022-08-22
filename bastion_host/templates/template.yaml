@@ -1,0 +1,294 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "A stack for deploying a VPC with a Bastion Host to securely connect to a private EC2 Instance"
+
+Parameters:
+  BastionInstanceImageId:
+    Type: String
+    Default: "ami-090fa75af13c156b4"
+  BastionInstanceInstanceType:
+    Type: String
+    Default: "t2.micro"
+  PrivateInstanceImageId:
+    Type: String
+    Default: "ami-090fa75af13c156b4"
+  PrivateInstanceInstanceType:
+    Type: String
+    Default: "t2.micro"
+  DemoVpcCidrBlock:
+    Type: String
+    Default: "10.0.0.0/16"
+  PublicSubnetCidrBlock:
+    Type: String
+    Default: "10.0.0.0/24"
+  PrivateSubnetCidrBlock:
+    Type: String
+    Default: "10.0.16.0/20"
+  BastionInstanceAllowSSHTrafficFromCidr:
+    Type: String
+    Default: "0.0.0.0/0"
+  PublicSubnetAllowSSHTrafficFromCidr:
+    Type: String
+    Default: "0.0.0.0/0"
+  PrivateInstanceKeyPairName:
+    Type: String
+    Default: "PrivateInstanceKeyPair"
+
+Resources:
+  DemoVPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock:
+        Ref: DemoVpcCidrBlock
+
+  PublicSubnet:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: us-east-1a
+      CidrBlock:
+        Ref: PublicSubnetCidrBlock
+      VpcId: !Ref DemoVPC
+  
+  DemoInternetGW:
+    Type: "AWS::EC2::InternetGateway"
+  
+  DemoVPCDemoInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref DemoInternetGW
+      VpcId: !Ref DemoVPC
+
+  PublicSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DemoVPC
+
+  PublicSubnetRouteTableInternetGWRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicSubnetRouteTable
+      GatewayId: !Ref DemoInternetGW
+      DestinationCidrBlock: "0.0.0.0/0"
+  
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicSubnetRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  PublicSubnetNACL:
+    Type: "AWS::EC2::NetworkAcl"
+    Properties:
+      VpcId: !Ref DemoVPC
+  
+  PublicSubnetNetworkAclAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties: 
+      NetworkAclId: !Ref PublicSubnetNACL
+      SubnetId: !Ref PublicSubnet
+
+  PublicSubnetNACLEntryIngress100:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock:
+        Ref: PublicSubnetAllowSSHTrafficFromCidr
+      Egress: false
+      NetworkAclId: !Ref PublicSubnetNACL
+      Protocol: 6
+      PortRange:
+        From: 22
+        To: 22
+      RuleAction: allow
+      RuleNumber: 100
+
+  # Ephemeral Ports
+  PublicSubnetNACLEntryIngress200:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock:
+        Ref: PublicSubnetAllowSSHTrafficFromCidr
+      Egress: false
+      NetworkAclId: !Ref PublicSubnetNACL
+      Protocol: 6
+      PortRange:
+        From: 1024
+        To: 65535
+      RuleAction: allow
+      RuleNumber: 200
+
+  PublicSubnetNACLEntryEgress100:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock:
+        Ref: PublicSubnetAllowSSHTrafficFromCidr
+      Egress: true
+      NetworkAclId: !Ref PublicSubnetNACL
+      Protocol: 6
+      PortRange:
+        From: 22
+        To: 22
+      RuleAction: allow
+      RuleNumber: 100
+
+  # Ephemeral Ports
+  PublicSubnetNACLEntryEgress200:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock:
+        Ref: PublicSubnetAllowSSHTrafficFromCidr
+      Egress: true
+      NetworkAclId: !Ref PublicSubnetNACL
+      Protocol: 6
+      PortRange:
+        From: 1024
+        To: 65535
+      RuleAction: allow
+      RuleNumber: 200
+ 
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: BastionInstanceImageId
+      InstanceType:
+        Ref: BastionInstanceInstanceType
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !GetAtt BastionInstanceSSHSecurityGroup.GroupId
+      KeyName:
+        Ref: PrivateInstanceKeyPairName
+
+  DemoElasticIP:
+    Type: AWS::EC2::EIP
+    Properties: 
+      InstanceId: !Ref BastionInstance
+
+  BastionInstanceSSHSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      SecurityGroupIngress:
+      - CidrIp:
+          Ref: BastionInstanceAllowSSHTrafficFromCidr
+        FromPort: 22
+        IpProtocol: tcp
+        ToPort: 22
+      VpcId: !Ref DemoVPC
+
+
+
+
+
+  PrivateSubnet:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: us-east-1a
+      CidrBlock:
+        Ref: PrivateSubnetCidrBlock
+      VpcId: !Ref DemoVPC
+
+  PrivateSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DemoVPC
+  
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateSubnetRouteTable
+      SubnetId: !Ref PrivateSubnet
+
+  PrivateSubnetNACL:
+    Type: "AWS::EC2::NetworkAcl"
+    Properties:
+      VpcId: !Ref DemoVPC
+  
+  PrivateSubnetNetworkAclAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties: 
+      NetworkAclId: !Ref PrivateSubnetNACL
+      SubnetId: !Ref PrivateSubnet
+
+  PrivateSubnetNACLEntryIngress100:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: !Sub
+        - '${BastionInstancePrivateIp}/32'
+        - BastionInstancePrivateIp: !GetAtt BastionInstance.PrivateIp
+      Egress: false
+      NetworkAclId: !Ref PrivateSubnetNACL
+      Protocol: 6
+      PortRange:
+        From: 22
+        To: 22
+      RuleAction: allow
+      RuleNumber: 100
+
+  PrivateSubnetNACLEntryIngress200:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: !Sub
+        - '${BastionInstancePrivateIp}/32'
+        - BastionInstancePrivateIp: !GetAtt BastionInstance.PrivateIp
+      Egress: false
+      NetworkAclId: !Ref PrivateSubnetNACL
+      Protocol: 6
+      PortRange:
+        From: 1024
+        To: 65535
+      RuleAction: allow
+      RuleNumber: 200
+
+  PrivateSubnetNACLEntryEgress100:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: !Sub
+        - '${BastionInstancePrivateIp}/32'
+        - BastionInstancePrivateIp: !GetAtt BastionInstance.PrivateIp
+      Egress: true
+      NetworkAclId: !Ref PrivateSubnetNACL
+      Protocol: 6
+      PortRange:
+        From: 22
+        To: 22
+      RuleAction: allow
+      RuleNumber: 100
+
+  PrivateSubnetNACLEntryEgress200:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: !Sub
+        - '${BastionInstancePrivateIp}/32'
+        - BastionInstancePrivateIp: !GetAtt BastionInstance.PrivateIp
+      Egress: true
+      NetworkAclId: !Ref PrivateSubnetNACL
+      Protocol: 6
+      PortRange:
+        From: 1024
+        To: 65535
+      RuleAction: allow
+      RuleNumber: 200
+
+  PrivateInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: PrivateInstanceImageId
+      InstanceType:
+        Ref: PrivateInstanceInstanceType
+      SubnetId: !Ref PrivateSubnet
+      SecurityGroupIds:
+        - !GetAtt PrivateSSHSecurityGroup.GroupId
+      KeyName: 'PrivateInstanceKeyPair'
+
+  PrivateSSHSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22 only from private instance ip
+      SecurityGroupIngress:
+      - CidrIp: !Sub
+          - '${BastionInstancePrivateIp}/32'
+          - BastionInstancePrivateIp: !GetAtt BastionInstance.PrivateIp
+        FromPort: 22
+        IpProtocol: tcp
+        ToPort: 22
+      VpcId: !Ref DemoVPC
